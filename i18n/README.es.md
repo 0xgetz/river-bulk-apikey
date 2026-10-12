@@ -4,7 +4,7 @@
 
 # river-bulk-apikey
 
-**Crea cuentas de [River AI](https://console.river.ai) en lote y genera automáticamente una API key para cada una — mediante un navegador (cloud) real vía CDP. Cero dependencias.**
+**Crea cuentas de [River AI](https://console.river.ai) en lote y genera automáticamente una API key para cada una — mediante un Chrome/Chromium real en tu máquina o VPS vía CDP. Cero dependencias.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-3DA639.svg?style=for-the-badge)](../LICENSE)
 [![Node](https://img.shields.io/badge/Node-%E2%89%A518-339933.svg?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org)
@@ -23,7 +23,7 @@
 - 🔑 **Creación masiva de cuentas + API keys** — una cuenta River *y* una clave `rv_…` por ejecución.
 - 🧼 **Sesiones totalmente aisladas** — cada cuenta se ejecuta en su propio contexto de navegador CDP; cookies y `localStorage` no se filtran.
 - 🪶 **Cero dependencias** — cliente WebSocket RFC6455 + CDP hecho a mano. Sin `npm install`.
-- 🤖 **Compatible con Turnstile** — el registro ocurre en un navegador real, por lo que el navegador cloud de Browser Use resuelve Cloudflare Turnstile y WorkOS Radar.
+- 🤖 **Registro en navegador real** — la página de WorkOS AuthKit (Cloudflare Turnstile + WorkOS Radar) se maneja en Chrome/Chromium real en tu máquina o VPS.
 - 📧 **Buzones desechables** — los códigos se leen directamente de [mail.tm](https://mail.tm).
 - 📦 **Exportación** — resultados en JSON **y** CSV.
 - 🔌 **Conector 9Router** — expón tus claves River como proveedor compatible con OpenAI en [9Router](https://9router.com) con un comando.
@@ -32,11 +32,12 @@
 ## 🚀 Inicio rápido
 
 ```bash
-# 1. Consigue un navegador (Browser Use cloud, o Chrome local con puerto de depuración)
-export BU_CDP_WS="wss://<tu-navegador>.cdp.browser-use.com/devtools/browser/<id>"
+# 1. Inicia Chrome headless con un puerto de depuración (máquina o VPS)
+google-chrome --headless=new --remote-debugging-port=9222 \
+  --user-data-dir="$HOME/.river-chrome" --no-sandbox &
 
 # 2. Crea 3 cuentas, cada una con su API key
-node src/cli.js --count 3
+node src/cli.js --count 3 --cdp-url http://127.0.0.1:9222
 
 # resultados en outputs/river-accounts.json (+ .csv)
 ```
@@ -59,13 +60,20 @@ buzón mail.tm ──▶ UI de registro ──▶ código ──▶ consola (tok
 
 Detalle completo: [`docs/PROTOCOL.md`](../docs/PROTOCOL.md).
 
-## 🖥️ Obtener un navegador
+## 🖥️ Requisitos — un Chrome que controlar
 
-| Método | Variable | Notas |
+`river-bulk` habla con cualquier Chrome/Chromium accesible por el **puerto de
+depuración CDP**. Tu máquina o un VPS es suficiente — sin servicios cloud.
+
+```bash
+google-chrome --headless=new --remote-debugging-port=9222 \
+  --user-data-dir="$HOME/.river-chrome" --no-sandbox &
+```
+
+| Flag / env | Valor | Notas |
 | --- | --- | --- |
-| **Browser Use cloud** (recomendado) | `BU_CDP_WS` | Resuelve Turnstile, proxy residencial. |
-| Chrome local (puerto de depuración) | `CDP_WS` | `google-chrome --remote-debugging-port=9222 --user-data-dir=./.bcode/chrome-data-dir` |
-| Resolver desde HTTP | `CDP_URL` | p. ej. `CDP_URL=http://127.0.0.1:9222` |
+| `--cdp-url` / `CDP_URL` | `http://127.0.0.1:9222` | Resuelve `/json/version` automáticamente. **Por defecto.** |
+| `--cdp-ws` / `CDP_WS` | `ws://host:9222/devtools/browser/<id>` | URL WebSocket explícita. |
 
 ## 🧰 Referencia de la CLI
 
@@ -74,6 +82,8 @@ node src/cli.js [opciones]
 
   -n, --count <n>          número de cuentas                    [1]
   -c, --concurrency <n>    cuentas en paralelo (1 por navegador) [1]
+      --cdp-url <url>      endpoint HTTP de depuración      [http://127.0.0.1:9222]
+      --cdp-ws <url>       URL WebSocket CDP explícita
       --out <file>         salida JSON        [outputs/river-accounts.json]
       --csv <file>         salida CSV         (junto a --out)
       --key-prefix <name>  prefijo del nombre de la key      [river-bulk]
@@ -87,7 +97,7 @@ node src/cli.js [opciones]
 const { CDP, provisionAccount, listModels } = require('./src/river');
 const { MailTM } = require('./src/mailtm');
 
-const cdp = new CDP(process.env.BU_CDP_WS, {});
+const cdp = new CDP('ws://127.0.0.1:9222/devtools/browser/<id>', {});
 await cdp.connect();
 await cdp.attachToPage();
 

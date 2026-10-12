@@ -8,14 +8,14 @@
  * Usage:
  *   node src/cli.js --count 3
  *   node src/cli.js --count 10 --concurrency 2 --out accounts.json
- *   node src/cli.js --cookies "solar_session=..."          # advanced
  *
- * Environment:
- *   BU_CDP_WS     Browser Use cloud CDP WebSocket URL (recommended)
- *   CDP_WS        Generic wss:// or ws:// CDP endpoint
- *   CDP_URL       http(s)://host:port used to resolve /json/version
+ * A CDP-reachable Chrome is required. On a VPS start one headless:
+ *   google-chrome --headless=new --remote-debugging-port=9222 \
+ *     --user-data-dir="$HOME/.river-chrome" --no-sandbox
+ * then point the tool at it with --cdp-url http://127.0.0.1:9222
+ * (or CDP_URL / CDP_WS in the environment).
  *
- * Zero dependencies. Node.js >= 18 (global fetch not required).
+ * Zero dependencies. Node.js >= 18.
  */
 
 const fs = require('fs');
@@ -49,16 +49,29 @@ function banner() {
   );
 }
 
-async function resolveWs() {
-  if (process.env.BU_CDP_WS) return process.env.BU_CDP_WS;
-  if (process.env.CDP_WS) return process.env.CDP_WS;
-  if (process.env.CDP_URL) {
-    const base = process.env.CDP_URL.replace(/\/$/, '');
+/**
+ * Resolve the CDP WebSocket URL from, in priority order:
+ *   --cdp-ws <wss://…>         explicit websocket
+ *   --cdp-url <http://…>       HTTP endpoint → resolved via /json/version
+ *   CDP_WS / CDP_URL env vars
+ *   ws://127.0.0.1:9222 default
+ */
+async function resolveWs(args) {
+  if (args['cdp-ws']) return String(args['cdp-ws']);
+  const httpUrl = args['cdp-url'] || process.env.CDP_URL;
+  if (httpUrl) {
+    const base = String(httpUrl).replace(/\/$/, '');
     const res = await fetch(`${base}/json/version`);
+    if (!res.ok) throw new Error(`could not reach Chrome at ${base} (${res.status})`);
     const j = await res.json();
     return j.webSocketDebuggerUrl;
   }
-  throw new Error('No CDP endpoint. Set BU_CDP_WS, CDP_WS, or CDP_URL.');
+  if (process.env.CDP_WS) return process.env.CDP_WS;
+
+  const fallback = 'http://127.0.0.1:9222';
+  const res = await fetch(`${fallback}/json/version`);
+  const j = await res.json();
+  return j.webSocketDebuggerUrl;
 }
 
 async function mapLimit(items, limit, worker) {
@@ -96,7 +109,18 @@ async function main() {
   const quiet = !!args.quiet;
 
   banner();
-  const wsUrl = await resolveWs();
+  let wsUrl;
+  try {
+    wsUrl = await resolveWs(args);
+  } catch (e) {
+    throw new Error(
+      `${e.message}\n  Start Chrome with a debug port first, e.g.:\n` +
+        '    google-chrome --headless=new --remote-debugging-port=9222 \\\n' +
+        '      --user-data-dir="$HOME/.river-chrome" --no-sandbox\n' +
+        '  then run: node src/cli.js --cdp-url http://127.0.0.1:9222'
+    );
+  }
+
   const cdp = new CDP(wsUrl, {});
   await cdp.connect();
   await cdp.attachToPage();
@@ -173,7 +197,9 @@ river-bulk — bulk create River AI accounts + API keys
 
 Options:
   -n, --count <n>          number of accounts to create            [1]
-  -c, --concurrency <n>    parallel accounts (use 1 for one browser) [1]
+  -c, --concurrency <n>    parallel accounts (1 per browser/context) [1]
+      --cdp-url <url>      Chrome debug HTTP endpoint     [http://127.0.0.1:9222]
+      --cdp-ws <url>       explicit CDP WebSocket URL
       --out <file>         JSON output path           [outputs/river-accounts.json]
       --csv <file>         CSV output path (defaults beside --out)
       --key-prefix <name>  API key name prefix                [river-bulk]
@@ -181,10 +207,12 @@ Options:
   -h, --help               show this help
 
 Environment:
-  BU_CDP_WS / CDP_WS / CDP_URL   CDP endpoint of the browser to drive
+  CDP_URL / CDP_WS         CDP endpoint of the Chrome to drive
 
-Example:
-  BU_CDP_WS=wss://... node src/cli.js --count 5 --concurrency 1 --out outputs/batch.json
+Quick start (VPS):
+  google-chrome --headless=new --remote-debugging-port=9222 \\
+    --user-data-dir="$HOME/.river-chrome" --no-sandbox &
+  node src/cli.js --count 5 --cdp-url http://127.0.0.1:9222
 `);
 }
 

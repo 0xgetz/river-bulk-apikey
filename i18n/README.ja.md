@@ -23,7 +23,7 @@
 - 🔑 **アカウント＋API キーの一括作成** — 1 実行で River アカウント *と* `rv_…` キーを 1 つずつ。
 - 🧼 **完全に分離されたセッション** — 各アカウントは独自の CDP ブラウザコンテキストで動作し、cookie や `localStorage` が漏れません。
 - 🪶 **依存関係ゼロ** — 自作の RFC6455 WebSocket + CDP クライアント。`npm install` 不要。
-- 🤖 **Turnstile 対応** — 実ブラウザで登録するため、Cloudflare Turnstile と WorkOS Radar は Browser Use クラウドブラウザが自動で解決します。
+- 🤖 **実ブラウザでの登録** — WorkOS AuthKit のページ（Cloudflare Turnstile + WorkOS Radar）を、自分のマシンまたは VPS 上の実 Chrome/Chromium で操作します。
 - 📧 **使い捨て受信箱** — 認証コードは [mail.tm](https://mail.tm) から直接取得。
 - 📦 **エクスポート** — JSON **と** CSV に出力。
 - 🔌 **9Router コネクタ** — 1 コマンドで River キーを [9Router](https://9router.com) の OpenAI 互換プロバイダに。
@@ -32,11 +32,12 @@
 ## 🚀 クイックスタート
 
 ```bash
-# 1. 操作するブラウザを用意（Browser Use クラウド、またはローカル Chrome のデバッグポート）
-export BU_CDP_WS="wss://<your-browser>.cdp.browser-use.com/devtools/browser/<id>"
+# 1. マシンまたは VPS でデバッグポート付き headless Chrome を起動
+google-chrome --headless=new --remote-debugging-port=9222 \
+  --user-data-dir="$HOME/.river-chrome" --no-sandbox &
 
 # 2. 3 アカウントを作成（それぞれに API キー）
-node src/cli.js --count 3
+node src/cli.js --count 3 --cdp-url http://127.0.0.1:9222
 
 # 結果: outputs/river-accounts.json（+ .csv）
 ```
@@ -59,13 +60,20 @@ mail.tm 受信箱 ──▶ 登録 UI ──▶ 認証コード ──▶ コン
 
 詳細: [`docs/PROTOCOL.md`](../docs/PROTOCOL.md)。
 
-## 🖥️ ブラウザの用意
+## 🖥️ 必要条件 — 操作する Chrome
 
-| 方法 | 環境変数 | 備考 |
+`river-bulk` は **CDP デバッグポート** で到達可能な任意の Chrome/Chromium と通信します。
+自分のマシンまたは VPS で十分です — クラウドサービスは不要です。
+
+```bash
+google-chrome --headless=new --remote-debugging-port=9222 \
+  --user-data-dir="$HOME/.river-chrome" --no-sandbox &
+```
+
+| 引数 / 環境変数 | 値 | 備考 |
 | --- | --- | --- |
-| **Browser Use クラウド**（推奨） | `BU_CDP_WS` | Turnstile を自動解決、レジデンシャルプロキシ。 |
-| ローカル Chrome デバッグポート | `CDP_WS` | `google-chrome --remote-debugging-port=9222 --user-data-dir=./.bcode/chrome-data-dir` |
-| HTTP から解決 | `CDP_URL` | 例 `CDP_URL=http://127.0.0.1:9222` |
+| `--cdp-url` / `CDP_URL` | `http://127.0.0.1:9222` | `/json/version` を自動解決。**既定。** |
+| `--cdp-ws` / `CDP_WS` | `ws://host:9222/devtools/browser/<id>` | 明示的な WebSocket URL。 |
 
 ## 🧰 CLI リファレンス
 
@@ -74,6 +82,8 @@ node src/cli.js [オプション]
 
   -n, --count <n>          作成するアカウント数                [1]
   -c, --concurrency <n>    並列数（ブラウザ 1 台につき 1）      [1]
+      --cdp-url <url>      Chrome デバッグ HTTP エンドポイント [http://127.0.0.1:9222]
+      --cdp-ws <url>       明示的な CDP WebSocket URL
       --out <file>         JSON 出力       [outputs/river-accounts.json]
       --csv <file>         CSV 出力        （既定は --out と同じ場所）
       --key-prefix <name>  API キー名の接頭辞                [river-bulk]
@@ -87,7 +97,7 @@ node src/cli.js [オプション]
 const { CDP, provisionAccount, listModels } = require('./src/river');
 const { MailTM } = require('./src/mailtm');
 
-const cdp = new CDP(process.env.BU_CDP_WS, {});
+const cdp = new CDP('ws://127.0.0.1:9222/devtools/browser/<id>', {});
 await cdp.connect();
 await cdp.attachToPage();
 

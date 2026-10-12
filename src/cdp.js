@@ -5,8 +5,8 @@
  *
  * Speaks the CDP JSON protocol over a WebSocket. Node's global WebSocket
  * cannot send custom headers, so we implement a tiny RFC6455 client on top of
- * `tls` when we need to authenticate (Browser Use cloud) or fall back to the
- * global WebSocket for plain ws:// endpoints (local Chrome with a debug port).
+ * `tls` for wss:// endpoints, and use it directly for plain ws:// endpoints
+ * too (a local or VPS-hosted Chrome with a remote-debugging port).
  *
  * Exposes a Promise-based `send(method, params)` plus an event emitter.
  */

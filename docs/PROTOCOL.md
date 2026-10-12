@@ -22,7 +22,9 @@ Authentication is delegated to **WorkOS AuthKit**, whose hosted pages live at
 `login.console.river.ai` and are protected by **Cloudflare Turnstile** plus
 **WorkOS Radar**. `POST /api/auth/signup` returns `404 Password signup is
 disabled`. A real browser is therefore the only reliable way to create an
-account, and Browser Use cloud browsers solve Turnstile automatically.
+account, and the only reliable way to create one is to drive the real UI in a
+Chromium instance started with a CDP remote-debugging port (on your own machine
+or a VPS).
 
 ## 2. The flow, step by step
 
@@ -125,5 +127,5 @@ curl https://api.river.ai/v1/chat/completions \
 
 - New accounts receive a **$25.00** starting balance (`/api/billing/account`).
 - Each run needs a fresh browser context; reusing one re-logs the same user.
-- Turnstile is solved by the cloud browser. Do not add a stealth patch.
+- Turnstile is solved inside the real browser. Do not add a stealth patch.
 - mail.tm domains may rate-limit aggressive bursts — keep concurrency modest.

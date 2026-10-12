@@ -4,15 +4,21 @@
  * Example: create a single River account and print its API key, then
  * immediately list the models the key can access.
  *
- *   BU_CDP_WS=wss://... node examples/basic.js
+ *   node examples/basic.js --cdp-url http://127.0.0.1:9222
  */
 
 const { CDP, provisionAccount, listModels } = require('../src/river');
 const { MailTM } = require('../src/mailtm');
 
 (async () => {
-  const wsUrl = process.env.BU_CDP_WS || process.env.CDP_WS;
-  if (!wsUrl) throw new Error('set BU_CDP_WS (cloud) or CDP_WS (local Chrome)');
+  const argv = process.argv.slice(2);
+  const args = {};
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i].startsWith('--')) args[argv[i].slice(2)] = argv[++i];
+  }
+  const url = args['cdp-url'] || process.env.CDP_URL || 'http://127.0.0.1:9222';
+  const ver = await (await fetch(url.replace(/\/$/, '') + '/json/version')).json();
+  const wsUrl = args['cdp-ws'] || process.env.CDP_WS || ver.webSocketDebuggerUrl;
 
   const cdp = new CDP(wsUrl, {});
   await cdp.connect();

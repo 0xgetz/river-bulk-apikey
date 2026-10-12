@@ -11,7 +11,7 @@
 [![Dependencies](https://img.shields.io/badge/dependencies-0-blue.svg?style=for-the-badge)](#)
 [![OpenAI compatible](https://img.shields.io/badge/API-OpenAI--compatible-412991.svg?style=for-the-badge&logo=openai&logoColor=white)](https://docs.river.ai/guides/inference)
 [![9Router](https://img.shields.io/badge/9Router-connector-8B5CF6.svg?style=for-the-badge)](#-connect-to-9router)
-[![Browsers](https://img.shields.io/badge/Browser%20Use-cloud%20browser-0EA5E9.svg?style=for-the-badge)](https://browser-use.com)
+[![Browsers](https://img.shields.io/badge/Browser-Chrome%20%2F%20Chromium-4285F4.svg?style=for-the-badge&logo=googlechrome&logoColor=white)](#-requirements)
 
 [English](README.md) · [Bahasa Indonesia](i18n/README.id.md) · [简体中文](i18n/README.zh.md) · [日本語](i18n/README.ja.md) · [Español](i18n/README.es.md) · [Deutsch](i18n/README.de.md)
 
@@ -24,7 +24,7 @@
 - 🔑 **Bulk account + API key creation** — one River account *and* one `rv_…` key per run.
 - 🧼 **Fully isolated sessions** — every account runs in its own CDP browser context, so no cookies or `localStorage` leak between accounts.
 - 🪶 **Zero dependencies** — a hand-rolled RFC6455 WebSocket + CDP client. No `npm install`.
-- 🤖 **Turnstile-friendly** — sign-up runs in a real browser, so Cloudflare Turnstile and WorkOS Radar are solved for you by the Browser Use cloud browser.
+- 🤖 **Real-browser sign-up** — the WorkOS AuthKit page (Cloudflare Turnstile + WorkOS Radar) is driven in a real Chrome/Chromium on your own machine or VPS.
 - 📧 **Disposable inboxes** — verification codes are read straight from [mail.tm](https://mail.tm).
 - 📦 **Exports** — results written to JSON **and** CSV.
 - 🔌 **9Router connector** — expose your River keys as an OpenAI-compatible provider in [9Router](https://9router.com) in one command.
@@ -33,12 +33,12 @@
 ## 🚀 Quick start
 
 ```bash
-# 1. Get a browser to drive (Browser Use cloud, or a local Chrome debug port)
-#    Browser Use cloud:
-export BU_CDP_WS="wss://<your-browser>.cdp.browser-use.com/devtools/browser/<id>"
+# 1. Start a headless Chrome with a debug port
+google-chrome --headless=new --remote-debugging-port=9222 \
+  --user-data-dir="$HOME/.river-chrome" --no-sandbox &
 
 # 2. Create 3 accounts, each with its own API key
-node src/cli.js --count 3
+node src/cli.js --count 3 --cdp-url http://127.0.0.1:9222
 
 # results land in outputs/river-accounts.json (+ .csv)
 ```
@@ -79,15 +79,35 @@ mail.tm inbox ──▶ sign-up UI ──▶ e-mail code ──▶ console (bear
 
 Full breakdown: [`docs/PROTOCOL.md`](docs/PROTOCOL.md).
 
-## 🖥️ Getting a browser
+## 🖥️ Requirements — a Chrome to drive
 
-`river-bulk` needs a CDP endpoint. Pick one:
+`river-bulk` talks to any Chrome/Chromium reachable over the **CDP debug port**.
+Your machine or a VPS is enough — no cloud service required.
 
-| Method | Env var | Notes |
+```bash
+# Linux / VPS, headless
+google-chrome --headless=new --remote-debugging-port=9222 \
+  --user-data-dir="$HOME/.river-chrome" --no-sandbox &
+
+# macOS
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+  --remote-debugging-port=9222 --user-data-dir="$HOME/.river-chrome"
+
+# Windows (PowerShell)
+& "C:\Program Files\Google\Chrome\Application\chrome.exe" `
+  --remote-debugging-port=9222 --user-data-dir="$env:USERPROFILE\.river-chrome"
+```
+
+Then point the tool at it:
+
+| Flag / env | Value | Notes |
 | --- | --- | --- |
-| **[Browser Use](https://browser-use.com) cloud** (recommended) | `BU_CDP_WS` | Auto-solves Turnstile, residential proxy, runs in the background. |
-| Local Chrome debug port | `CDP_WS` | `google-chrome --remote-debugging-port=9222 --user-data-dir=./.bcode/chrome-data-dir`, then `CDP_WS=ws://127.0.0.1:9222/devtools/browser/<id>` |
-| Resolve from an HTTP endpoint | `CDP_URL` | e.g. `CDP_URL=http://127.0.0.1:9222` — resolves `/json/version` for you. |
+| `--cdp-url` / `CDP_URL` | `http://127.0.0.1:9222` | Resolves `/json/version` automatically. **Default.** |
+| `--cdp-ws` / `CDP_WS` | `ws://host:9222/devtools/browser/<id>` | Explicit WebSocket URL. |
+
+> On a headless VPS, Chromium needs a few shared libraries (`libnss3`, `libatk1.0-0`,
+> `libgbm1`, `libasound2`, …). Install them via your distro's package manager if Chrome
+> exits immediately. Turnstile widgets on the sign-up page render normally in a real Chrome.
 
 ## 🧰 CLI reference
 
@@ -96,6 +116,8 @@ node src/cli.js [options]
 
   -n, --count <n>          number of accounts to create             [1]
   -c, --concurrency <n>    parallel accounts (1 per browser)         [1]
+      --cdp-url <url>      Chrome debug HTTP endpoint     [http://127.0.0.1:9222]
+      --cdp-ws <url>       explicit CDP WebSocket URL
       --out <file>         JSON output        [outputs/river-accounts.json]
       --csv <file>         CSV output         (defaults beside --out)
       --key-prefix <name>  API key name prefix                  [river-bulk]
@@ -109,7 +131,7 @@ node src/cli.js [options]
 const { CDP, provisionAccount, listModels } = require('./src/river');
 const { MailTM } = require('./src/mailtm');
 
-const cdp = new CDP(process.env.BU_CDP_WS, {});
+const cdp = new CDP('ws://127.0.0.1:9222/devtools/browser/<id>', {});
 await cdp.connect();
 await cdp.attachToPage();
 

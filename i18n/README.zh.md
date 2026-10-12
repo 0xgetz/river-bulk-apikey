@@ -23,7 +23,7 @@
 - 🔑 **批量创建账号 + API 密钥** —— 每个账号同时得到一个 River 账号和一个 `rv_…` 密钥。
 - 🧼 **完全隔离的会话** —— 每个账号运行在独立的 CDP 浏览器上下文中，cookie 与 `localStorage` 不会互相泄漏。
 - 🪶 **零依赖** —— 手写的 RFC6455 WebSocket + CDP 客户端，无需 `npm install`。
-- 🤖 **兼容 Turnstile** —— 注册在真实浏览器中进行，Cloudflare Turnstile 与 WorkOS Radar 由 Browser Use 云端浏览器自动完成。
+- 🤖 **真实浏览器注册** —— WorkOS AuthKit 页面（Cloudflare Turnstile + WorkOS Radar）在你自己机器或 VPS 上的真实 Chrome/Chromium 中驱动。
 - 📧 **一次性邮箱** —— 验证码直接读取自 [mail.tm](https://mail.tm)。
 - 📦 **导出** —— 结果写入 JSON **和** CSV。
 - 🔌 **9Router 连接器** —— 一条命令即可把 River 密钥注册为 [9Router](https://9router.com) 的 OpenAI 兼容提供商。
@@ -32,11 +32,12 @@
 ## 🚀 快速开始
 
 ```bash
-# 1. 准备一个可驱动的浏览器（Browser Use 云端，或本地 Chrome 调试端口）
-export BU_CDP_WS="wss://<your-browser>.cdp.browser-use.com/devtools/browser/<id>"
+# 1. 在机器或 VPS 上启动带调试端口的 headless Chrome
+google-chrome --headless=new --remote-debugging-port=9222 \
+  --user-data-dir="$HOME/.river-chrome" --no-sandbox &
 
 # 2. 创建 3 个账号，每个都有自己的 API 密钥
-node src/cli.js --count 3
+node src/cli.js --count 3 --cdp-url http://127.0.0.1:9222
 
 # 结果位于 outputs/river-accounts.json（及 .csv）
 ```
@@ -58,13 +59,20 @@ mail.tm 邮箱 ──▶ 注册 UI ──▶ 邮件验证码 ──▶ 控制台
 
 完整说明：[`docs/PROTOCOL.md`](../docs/PROTOCOL.md)。
 
-## 🖥️ 获取浏览器
+## 🖥️ 要求 —— 一个可驱动的 Chrome
 
-| 方式 | 环境变量 | 说明 |
+`river-bulk` 通过 **CDP 调试端口** 与任意 Chrome/Chromium 通信。
+你自己的机器或一台 VPS 即可 —— 无需云服务。
+
+```bash
+google-chrome --headless=new --remote-debugging-port=9222 \
+  --user-data-dir="$HOME/.river-chrome" --no-sandbox &
+```
+
+| 参数 / 环境变量 | 值 | 说明 |
 | --- | --- | --- |
-| **Browser Use 云端**（推荐） | `BU_CDP_WS` | 自动解决 Turnstile，住宅代理，后台运行。 |
-| 本地 Chrome 调试端口 | `CDP_WS` | `google-chrome --remote-debugging-port=9222 --user-data-dir=./.bcode/chrome-data-dir` |
-| 从 HTTP 解析 | `CDP_URL` | 例如 `CDP_URL=http://127.0.0.1:9222` |
+| `--cdp-url` / `CDP_URL` | `http://127.0.0.1:9222` | 自动解析 `/json/version`。**默认。** |
+| `--cdp-ws` / `CDP_WS` | `ws://host:9222/devtools/browser/<id>` | 显式 WebSocket URL。 |
 
 ## 🧰 CLI 参考
 
@@ -73,6 +81,8 @@ node src/cli.js [选项]
 
   -n, --count <n>          要创建的账号数量                    [1]
   -c, --concurrency <n>    并发账号数（每浏览器 1 个）          [1]
+      --cdp-url <url>      Chrome 调试 HTTP 端点     [http://127.0.0.1:9222]
+      --cdp-ws <url>       显式 CDP WebSocket URL
       --out <file>         JSON 输出        [outputs/river-accounts.json]
       --csv <file>         CSV 输出         （默认与 --out 同目录）
       --key-prefix <name>  API 密钥名称前缀               [river-bulk]
@@ -86,7 +96,7 @@ node src/cli.js [选项]
 const { CDP, provisionAccount, listModels } = require('./src/river');
 const { MailTM } = require('./src/mailtm');
 
-const cdp = new CDP(process.env.BU_CDP_WS, {});
+const cdp = new CDP('ws://127.0.0.1:9222/devtools/browser/<id>', {});
 await cdp.connect();
 await cdp.attachToPage();
 
