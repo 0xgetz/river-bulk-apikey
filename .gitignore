@@ -1,0 +1,18 @@
+# dependencies
+node_modules/
+
+# generated results (may contain secrets)
+outputs/
+accounts.json
+*.csv
+
+# env
+.env
+.env.*
+
+# os / editor
+.DS_Store
+Thumbs.db
+*.log
+.idea/
+.vscode/

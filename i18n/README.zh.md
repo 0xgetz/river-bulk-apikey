@@ -1,0 +1,135 @@
+<div align="center">
+
+<img src="../brand/logo.svg" alt="river-bulk" width="140" />
+
+# river-bulk-apikey
+
+**批量创建 [River AI](https://console.river.ai) 账号，并为每个账号自动生成一个 API 密钥 —— 通过真实（云端）浏览器经 CDP 驱动。零依赖。**
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-3DA639.svg?style=for-the-badge)](../LICENSE)
+[![Node](https://img.shields.io/badge/Node-%E2%89%A518-339933.svg?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org)
+[![Dependencies](https://img.shields.io/badge/dependencies-0-blue.svg?style=for-the-badge)](#)
+[![OpenAI compatible](https://img.shields.io/badge/API-OpenAI--compatible-412991.svg?style=for-the-badge&logo=openai&logoColor=white)](https://docs.river.ai/guides/inference)
+[![9Router](https://img.shields.io/badge/9Router-connector-8B5CF6.svg?style=for-the-badge)](#-连接到-9router)
+
+[English](../README.md) · [Bahasa Indonesia](README.id.md) · [简体中文](README.zh.md) · [日本語](README.ja.md) · [Español](README.es.md) · [Deutsch](README.de.md)
+
+</div>
+
+---
+
+## ✨ 特性
+
+- 🔑 **批量创建账号 + API 密钥** —— 每个账号同时得到一个 River 账号和一个 `rv_…` 密钥。
+- 🧼 **完全隔离的会话** —— 每个账号运行在独立的 CDP 浏览器上下文中，cookie 与 `localStorage` 不会互相泄漏。
+- 🪶 **零依赖** —— 手写的 RFC6455 WebSocket + CDP 客户端，无需 `npm install`。
+- 🤖 **兼容 Turnstile** —— 注册在真实浏览器中进行，Cloudflare Turnstile 与 WorkOS Radar 由 Browser Use 云端浏览器自动完成。
+- 📧 **一次性邮箱** —— 验证码直接读取自 [mail.tm](https://mail.tm)。
+- 📦 **导出** —— 结果写入 JSON **和** CSV。
+- 🔌 **9Router 连接器** —— 一条命令即可把 River 密钥注册为 [9Router](https://9router.com) 的 OpenAI 兼容提供商。
+- 🌍 **6 种语言** —— EN、ID、ZH、JA、ES、DE。
+
+## 🚀 快速开始
+
+```bash
+# 1. 准备一个可驱动的浏览器（Browser Use 云端，或本地 Chrome 调试端口）
+export BU_CDP_WS="wss://<your-browser>.cdp.browser-use.com/devtools/browser/<id>"
+
+# 2. 创建 3 个账号，每个都有自己的 API 密钥
+node src/cli.js --count 3
+
+# 结果位于 outputs/river-accounts.json（及 .csv）
+```
+
+## 🧭 工作原理
+
+River 控制台通过 **WorkOS AuthKit** 与 **Cloudflare Turnstile** 完成认证，
+因此不存在可脚本化的注册 HTTP 接口
+（`POST /api/auth/signup` → `404 Password signup is disabled`）。因此
+`river-bulk` 在浏览器中驱动真实 UI，再使用捕获到的会话令牌调用控制台 REST API：
+
+```
+mail.tm 邮箱 ──▶ 注册 UI ──▶ 邮件验证码 ──▶ 控制台（捕获令牌）
+                                                │
+                                    POST /api/keys { name }
+                                                ▼
+                                           rv_…  API 密钥
+```
+
+完整说明：[`docs/PROTOCOL.md`](../docs/PROTOCOL.md)。
+
+## 🖥️ 获取浏览器
+
+| 方式 | 环境变量 | 说明 |
+| --- | --- | --- |
+| **Browser Use 云端**（推荐） | `BU_CDP_WS` | 自动解决 Turnstile，住宅代理，后台运行。 |
+| 本地 Chrome 调试端口 | `CDP_WS` | `google-chrome --remote-debugging-port=9222 --user-data-dir=./.bcode/chrome-data-dir` |
+| 从 HTTP 解析 | `CDP_URL` | 例如 `CDP_URL=http://127.0.0.1:9222` |
+
+## 🧰 CLI 参考
+
+```
+node src/cli.js [选项]
+
+  -n, --count <n>          要创建的账号数量                    [1]
+  -c, --concurrency <n>    并发账号数（每浏览器 1 个）          [1]
+      --out <file>         JSON 输出        [outputs/river-accounts.json]
+      --csv <file>         CSV 输出         （默认与 --out 同目录）
+      --key-prefix <name>  API 密钥名称前缀               [river-bulk]
+      --quiet              静默每个账号的进度
+  -h, --help               显示帮助
+```
+
+### 作为库使用
+
+```js
+const { CDP, provisionAccount, listModels } = require('./src/river');
+const { MailTM } = require('./src/mailtm');
+
+const cdp = new CDP(process.env.BU_CDP_WS, {});
+await cdp.connect();
+await cdp.attachToPage();
+
+const account = await provisionAccount(cdp, new MailTM(), { keyName: 'my-key' });
+console.log(account.email, account.apiKey, account.balanceUsd);
+cdp.close();
+```
+
+## 🤖 可用模型
+
+| 模型 ID | 输入 | 缓存输入 | 输出 | 上下文 | 最大输出 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `deepseek-ai/DeepSeek-V4.1-Flash` | $0.12 | $0.0024 | $0.48 | 1,048,576 | 384,000 |
+| `zai-org/GLM-5.3-Flash` | $0.12 | $0.024 | $0.40 | 1,048,576 | 128K |
+
+*价格为每百万 token 的美元数。两者均支持文本 + 图像输入、流式、推理与函数调用。*
+
+```bash
+curl https://api.river.ai/v1/chat/completions \
+  -H "Authorization: Bearer $RIVER_API_KEY" -H "Content-Type: application/json" \
+  -d '{"model":"zai-org/GLM-5.3-Flash","messages":[{"role":"user","content":"你好"}]}'
+```
+
+## 🔌 连接到 9Router
+
+```bash
+node src/connect-9router.js \
+  --base http://localhost:20128 --password 123456 \
+  --api-key rv_xxxxxxxx
+```
+
+9Router 中的模型：
+
+```
+river/zai-org/GLM-5.3-Flash
+river/deepseek-ai/DeepSeek-V4.1-Flash
+```
+
+## ⚠️ 免责声明
+
+本项目仅用于**教育与研究**。自动化创建账号可能违反服务商的《服务条款》。
+使用风险自负。
+
+## 📄 许可证
+
+[MIT](../LICENSE) © 2026 river-bulk-apikey contributors

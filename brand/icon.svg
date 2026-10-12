@@ -1,0 +1,27 @@
+<svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="river-bulk icon">
+  <defs>
+    <linearGradient id="ibg" x1="0" y1="0" x2="128" y2="128" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0B1B3A"/>
+      <stop offset="1" stop-color="#0A3D62"/>
+    </linearGradient>
+    <linearGradient id="iriver" x1="12" y1="40" x2="116" y2="100" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#38BDF8"/>
+      <stop offset="0.5" stop-color="#22D3EE"/>
+      <stop offset="1" stop-color="#2DD4BF"/>
+    </linearGradient>
+    <linearGradient id="ikey" x1="72" y1="30" x2="110" y2="86" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FDE68A"/>
+      <stop offset="1" stop-color="#F59E0B"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="28" fill="url(#ibg)"/>
+  <path d="M14 58c10-8 20-8 30 0s20 8 30 0 20-8 30 0" stroke="url(#iriver)" stroke-width="7" stroke-linecap="round" fill="none"/>
+  <path d="M14 76c10-8 20-8 30 0s20 8 30 0 20-8 30 0" stroke="url(#iriver)" stroke-width="7" stroke-linecap="round" fill="none" opacity="0.7"/>
+  <path d="M14 94c10-8 20-8 30 0s20 8 30 0 20 8 30 0" stroke="url(#iriver)" stroke-width="7" stroke-linecap="round" fill="none" opacity="0.4"/>
+  <g transform="translate(70 22) rotate(18)">
+    <circle cx="14" cy="14" r="12" fill="url(#ikey)"/>
+    <circle cx="14" cy="14" r="4.5" fill="#0B1B3A"/>
+    <rect x="24" y="11.5" width="22" height="5" rx="2.5" fill="url(#ikey)"/>
+    <rect x="38" y="16" width="4" height="8" rx="2" fill="url(#ikey)"/>
+  </g>
+</svg>

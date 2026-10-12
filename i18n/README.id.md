@@ -1,0 +1,136 @@
+<div align="center">
+
+<img src="../brand/logo.svg" alt="river-bulk" width="140" />
+
+# river-bulk-apikey
+
+**Buat banyak akun [River AI](https://console.river.ai) sekaligus dan hasilkan satu API key untuk setiap akun — digerakkan lewat browser (cloud) nyata melalui CDP. Tanpa dependensi.**
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-3DA639.svg?style=for-the-badge)](../LICENSE)
+[![Node](https://img.shields.io/badge/Node-%E2%89%A518-339933.svg?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org)
+[![Dependencies](https://img.shields.io/badge/dependencies-0-blue.svg?style=for-the-badge)](#)
+[![OpenAI compatible](https://img.shields.io/badge/API-OpenAI--compatible-412991.svg?style=for-the-badge&logo=openai&logoColor=white)](https://docs.river.ai/guides/inference)
+[![9Router](https://img.shields.io/badge/9Router-connector-8B5CF6.svg?style=for-the-badge)](#-hubungkan-ke-9router)
+
+[English](../README.md) · [Bahasa Indonesia](README.id.md) · [简体中文](README.zh.md) · [日本語](README.ja.md) · [Español](README.es.md) · [Deutsch](README.de.md)
+
+</div>
+
+---
+
+## ✨ Fitur
+
+- 🔑 **Buat massal akun + API key** — satu akun River *dan* satu key `rv_…` per akun.
+- 🧼 **Sesi terisolasi** — setiap akun berjalan di konteks browser CDP sendiri, cookie dan `localStorage` tidak bocor antar akun.
+- 🪶 **Tanpa dependensi** — WebSocket RFC6455 + klien CDP buatan sendiri. Tidak perlu `npm install`.
+- 🤖 **Ramah Turnstile** — pendaftaran lewat browser nyata, sehingga Cloudflare Turnstile dan WorkOS Radar diselesaikan otomatis oleh browser cloud Browser Use.
+- 📧 **Kotak masuk sekali pakai** — kode verifikasi dibaca langsung dari [mail.tm](https://mail.tm).
+- 📦 **Ekspor** — hasil ditulis ke JSON **dan** CSV.
+- 🔌 **Konektor 9Router** — jadikan key River sebagai provider kompatibel-OpenAI di [9Router](https://9router.com) dengan satu perintah.
+- 🌍 **6 bahasa** — EN, ID, ZH, JA, ES, DE.
+
+## 🚀 Mulai cepat
+
+```bash
+# 1. Siapkan browser (Browser Use cloud, atau Chrome lokal dengan debug port)
+export BU_CDP_WS="wss://<browser-anda>.cdp.browser-use.com/devtools/browser/<id>"
+
+# 2. Buat 3 akun, masing-masing dengan API key sendiri
+node src/cli.js --count 3
+
+# hasil tersimpan di outputs/river-accounts.json (+ .csv)
+```
+
+## 🧭 Cara kerja
+
+Console River memakai autentikasi **WorkOS AuthKit** dengan **Cloudflare
+Turnstile**, sehingga tidak ada endpoint signup HTTP
+(`POST /api/auth/signup` → `404 Password signup is disabled`). Karena itu
+`river-bulk` menggerakkan UI asli di browser, lalu memanggil REST API console
+dengan token sesi yang ditangkap:
+
+```
+inbox mail.tm ──▶ UI pendaftaran ──▶ kode e-mail ──▶ console (token ditangkap)
+                                                          │
+                                              POST /api/keys { name }
+                                                          ▼
+                                                     rv_…  API key
+```
+
+Penjelasan lengkap: [`docs/PROTOCOL.md`](../docs/PROTOCOL.md).
+
+## 🖥️ Menyiapkan browser
+
+| Metode | Variabel | Catatan |
+| --- | --- | --- |
+| **Browser Use cloud** (disarankan) | `BU_CDP_WS` | Menyelesaikan Turnstile otomatis, proxy residensial. |
+| Chrome lokal debug port | `CDP_WS` | `google-chrome --remote-debugging-port=9222 --user-data-dir=./.bcode/chrome-data-dir` |
+| Resolve dari HTTP | `CDP_URL` | mis. `CDP_URL=http://127.0.0.1:9222` |
+
+## 🧰 Referensi CLI
+
+```
+node src/cli.js [opsi]
+
+  -n, --count <n>          jumlah akun                          [1]
+  -c, --concurrency <n>    akun paralel (1 per browser)         [1]
+      --out <file>         keluaran JSON      [outputs/river-accounts.json]
+      --csv <file>         keluaran CSV       (default di samping --out)
+      --key-prefix <name>  awalan nama API key             [river-bulk]
+      --quiet              senyapkan progres per akun
+  -h, --help               tampilkan bantuan
+```
+
+### Penggunaan sebagai library
+
+```js
+const { CDP, provisionAccount, listModels } = require('./src/river');
+const { MailTM } = require('./src/mailtm');
+
+const cdp = new CDP(process.env.BU_CDP_WS, {});
+await cdp.connect();
+await cdp.attachToPage();
+
+const account = await provisionAccount(cdp, new MailTM(), { keyName: 'kunci-saya' });
+console.log(account.email, account.apiKey, account.balanceUsd);
+cdp.close();
+```
+
+## 🤖 Model yang tersedia
+
+| Model ID | Input | Input cache | Output | Konteks | Output maks |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `deepseek-ai/DeepSeek-V4.1-Flash` | $0.12 | $0.0024 | $0.48 | 1.048.576 | 384.000 |
+| `zai-org/GLM-5.3-Flash` | $0.12 | $0.024 | $0.40 | 1.048.576 | 128K |
+
+*Harga dalam USD per juta token. Keduanya mendukung teks + gambar, streaming, reasoning, dan pemanggilan fungsi.*
+
+```bash
+curl https://api.river.ai/v1/chat/completions \
+  -H "Authorization: Bearer $RIVER_API_KEY" -H "Content-Type: application/json" \
+  -d '{"model":"zai-org/GLM-5.3-Flash","messages":[{"role":"user","content":"hai"}]}'
+```
+
+## 🔌 Hubungkan ke 9Router
+
+```bash
+node src/connect-9router.js \
+  --base http://localhost:20128 --password 123456 \
+  --api-key rv_xxxxxxxx
+```
+
+Model di 9Router:
+
+```
+river/zai-org/GLM-5.3-Flash
+river/deepseek-ai/DeepSeek-V4.1-Flash
+```
+
+## ⚠️ Penafian
+
+Proyek ini untuk **tujuan edukasi dan riset**. Otomatisasi pembuatan akun dapat
+melanggar Ketentuan Layanan penyedia. Anda bertanggung jawab atas penggunaannya.
+
+## 📄 Lisensi
+
+[MIT](../LICENSE) © 2026 river-bulk-apikey contributors

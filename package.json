@@ -1,0 +1,40 @@
+{
+  "name": "river-bulk-apikey",
+  "version": "1.0.0",
+  "description": "Bulk-create River AI (console.river.ai) accounts with auto-generated API keys, driven through a real (cloud) browser over CDP. Zero dependencies.",
+  "license": "MIT",
+  "type": "commonjs",
+  "bin": {
+    "river-bulk": "src/cli.js"
+  },
+  "main": "src/river.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node src/cli.js",
+    "create": "node src/cli.js --count 1",
+    "connect-9router": "node src/connect-9router.js"
+  },
+  "keywords": [
+    "river-ai",
+    "river",
+    "api-key",
+    "bulk",
+    "account-creator",
+    "openai-compatible",
+    "cdp",
+    "browser-automation",
+    "9router",
+    "llm"
+  ],
+  "files": [
+    "src",
+    "docs",
+    "examples",
+    "i18n",
+    "brand",
+    "README.md",
+    "LICENSE"
+  ]
+}
