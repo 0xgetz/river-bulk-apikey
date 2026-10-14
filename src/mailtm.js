@@ -11,9 +11,9 @@ const { URL } = require('url');
 
 const API = 'https://api.mail.tm';
 
-function request(method, path, { token, body } = {}) {
+function request(method, path, { token, body, agent, baseUrl = API } = {}) {
   return new Promise((resolve, reject) => {
-    const u = new URL(API + path);
+    const u = new URL((baseUrl || API) + path);
     const data = body ? JSON.stringify(body) : null;
     const headers = { Accept: 'application/json' };
     if (data) {
@@ -22,7 +22,7 @@ function request(method, path, { token, body } = {}) {
     }
     if (token) headers.Authorization = `Bearer ${token}`;
     const req = https.request(
-      { method, hostname: u.hostname, port: 443, path: u.pathname + u.search, headers },
+      { method, agent, hostname: u.hostname, port: 443, path: u.pathname + u.search, headers },
       (res) => {
         let chunks = '';
         res.on('data', (c) => (chunks += c));
@@ -44,14 +44,21 @@ function request(method, path, { token, body } = {}) {
 }
 
 class MailTM {
-  constructor({ domain } = {}) {
+  constructor({ domain, agent, baseUrl } = {}) {
     this.domain = domain || null;
+    this.agent = agent;
+    this.baseUrl = baseUrl || API;
     this.token = null;
+  }
+
+  /** Inbox calls leave through this instance's agent — i.e. through its proxy. */
+  request(method, path, opts = {}) {
+    return request(method, path, { agent: this.agent, baseUrl: this.baseUrl, ...opts });
   }
 
   async getDomain() {
     if (this.domain) return this.domain;
-    const res = await request('GET', '/domains');
+    const res = await this.request('GET', '/domains');
     const list = res.body['hydra:member'] || res.body;
     const active = (list || []).find((d) => d.isActive) || (list || [])[0];
     if (!active) throw new Error('No active mail.tm domain available');
@@ -64,7 +71,7 @@ class MailTM {
     const rand = Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
     const addr = address || `${rand}@${d}`;
     const pass = password || Math.random().toString(36).slice(2, 14) + 'Aa1!';
-    const res = await request('POST', '/accounts', { body: { address: addr, password: pass } });
+    const res = await this.request('POST', '/accounts', { body: { address: addr, password: pass } });
     if (res.status !== 201 && res.status !== 200) {
       throw new Error(`mail.tm account creation failed (${res.status}): ${JSON.stringify(res.body)}`);
     }
@@ -73,7 +80,7 @@ class MailTM {
   }
 
   async login({ address, password }) {
-    const res = await request('POST', '/token', { body: { address, password } });
+    const res = await this.request('POST', '/token', { body: { address, password } });
     if (res.status !== 200) throw new Error(`mail.tm login failed (${res.status})`);
     this.token = res.body.token;
     return this.token;
@@ -82,14 +89,14 @@ class MailTM {
   async messages({ address, password } = {}) {
     const token = this.token || (address ? await this.login({ address, password }) : null);
     if (!token) throw new Error('Not authenticated: call createAccount/login or pass address+password');
-    const res = await request('GET', '/messages', { token });
+    const res = await this.request('GET', '/messages', { token });
     if (res.status !== 200) throw new Error(`mail.tm messages failed (${res.status})`);
     return res.body['hydra:member'] || res.body;
   }
 
   async message(id, { address, password } = {}) {
     const token = this.token || (address ? await this.login({ address, password }) : null);
-    const res = await request('GET', `/messages/${id}`, { token });
+    const res = await this.request('GET', `/messages/${id}`, { token });
     if (res.status !== 200) throw new Error(`mail.tm message failed (${res.status})`);
     return res.body;
   }
