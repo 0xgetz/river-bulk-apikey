@@ -24,7 +24,7 @@
 - 🔑 **Bulk account + API key creation** — one River account *and* one `rv_…` key per run.
 - 🧼 **Fully isolated sessions** — every account runs in its own CDP browser context, so no cookies or `localStorage` leak between accounts.
 - 🪶 **Zero dependencies** — a hand-rolled RFC6455 WebSocket + CDP client. No `npm install`.
-- 🤖 **Real-browser sign-up** — the WorkOS AuthKit page (Cloudflare Turnstile + WorkOS Radar) is driven in a real Chrome/Chromium on your own machine or VPS.
+- 🤖 **Real-browser sign-up** — the hosted AuthKit page is driven in a real Chrome/Chromium on your own machine or VPS.
 - 📧 **Disposable inboxes** — verification codes are read straight from [mail.tm](https://mail.tm).
 - 📦 **Exports** — JSON, CSV, and a plain-text key list (one `rv_…` per line).
 - 🌐 **Proxy rotation** — one exit address per account: the browser *and* the API calls go through the proxy, and a dead proxy fails that account instead of leaking your IP.
@@ -63,11 +63,14 @@ connected to browser · minting 3 account(s), concurrency 1
 
 ## 🧭 How it works
 
-River's Console authenticates through **WorkOS AuthKit** with **Cloudflare
-Turnstile**, so there is no scriptable signup HTTP endpoint
-(`POST /api/auth/signup` → `404 Password signup is disabled`). `river-bulk`
-therefore drives the real hosted UI in a browser and then talks to the
-console's own REST API with the captured session token:
+River's Console signs users up through a **hosted browser flow** (WorkOS AuthKit)
+and its own REST API is bearer-token based, so there is no scriptable HTTP
+sign-up. `river-bulk` therefore drives the real hosted UI in a browser, captures
+the session bearer token and then talks to the console's own API:
+
+> **Heads-up:** River's sign-up currently asks for phone verification once it has
+> seen a few sign-ups, and the tool stops at that step when it appears — mint in
+> small batches.
 
 ```
 mail.tm inbox ──▶ sign-up UI ──▶ e-mail code ──▶ console (bearer token captured)
@@ -110,7 +113,7 @@ Then point the tool at it:
 
 > On a headless VPS, Chromium needs a few shared libraries (`libnss3`, `libatk1.0-0`,
 > `libgbm1`, `libasound2`, …). Install them via your distro's package manager if Chrome
-> exits immediately. Turnstile widgets on the sign-up page render normally in a real Chrome.
+> exits immediately.
 
 ## 🌐 Proxies
 
@@ -120,7 +123,7 @@ through a dependency-free CONNECT / SOCKS tunnel. An account never mixes
 addresses, and a broken proxy fails that account instead of leaking your IP —
 there is no direct fallback.
 
-### Your own address — the one value the egress check needs, and the one that goes stale
+### Your own address — the one value the egress check needs
 
 The preflight drops any proxy whose exit address *is* yours, so the check is
 only as good as that value. Three sources, in increasing order of exposure:
@@ -128,15 +131,12 @@ only as good as that value. Three sources, in increasing order of exposure:
 | Source | How it is obtained | Worth knowing |
 | --- | --- | --- |
 | `--own-ip <address>` / `OWN_IP` | you supply it | nothing is sent anywhere — but a **stale value silently disables the filter**, because a transparent proxy then matches an address that is no longer yours |
-| `--own-ip auto` | the router, over UPnP (LAN-only) | useless behind **carrier-grade NAT**, where the router's WAN address (`100.64.0.7` on the line this was measured on) is not the address the internet sees — such an answer is rejected rather than trusted |
+| `--own-ip auto` | the router, over UPnP (LAN-only) | useless behind **carrier-grade NAT**, where the router's WAN address is not the address the internet sees — such an answer is rejected rather than trusted |
 | `--allow-direct-lookup` | one HTTPS request from this machine to an echo service | always current, and the only source that itself leaves from your own address |
 
-Behind CGNAT the public address moves without the router showing anything: on
-the measured line it went `198.51.100.42` → `198.51.100.77` inside nine hours, which
-silently invalidated an earlier run's filter. Refresh the value per session —
-print it on a phone that is not on this LAN, read it from a provider panel, or
-let `--allow-direct-lookup` fetch it — and the tool prints the value it used on
-every run.
+The tool prints the address it used on every run; refresh `--own-ip` per session
+(print it on a phone that is not on this LAN, read it from a provider panel, or
+let `--allow-direct-lookup` fetch it).
 
 ```bash
 node src/cli.js --count 10 --proxies proxies.txt
@@ -166,68 +166,32 @@ socks5://10.0.0.3:1080
 
 ### What a free proxy list is actually worth
 
-Measured 2026-10-13 by stride-sampling 150 entries per list and requiring a
-full TLS handshake plus a request through the tunnel:
+Free lists are volatile — expect a different set of survivors minutes later — and
+expect the survivors to be someone else's compromised router: independent
+measurement puts ~10% of working free proxies at outright malicious, TLS
+interception included ([NDSS'24 open-proxy study](https://arxiv.org/html/2403.02445v1)).
+A proxy sees everything sent through it — including the bearer token this tool
+captures. The built-in preflight is strict on purpose; a paid or self-hosted exit
+is the safer choice for anything you care about.
 
-| List | Entries | Alive | Median handshake |
-| --- | --- | --- | --- |
-| [`monosans/proxy-list`](https://github.com/monosans/proxy-list) (re-checked hourly) | 274 | 42/150 · 28% | 0.4 s |
-| [`proxifly/free-proxy-list`](https://github.com/proxifly/free-proxy-list) | 5,475 | 9/150 · 6% | 3.1 s |
-| [`TheSpeedX/PROXY-List`](https://github.com/TheSpeedX/PROXY-List) (unchecked scrape) | 2,957 | 0/150 · 0% | — |
+## 📬 Mailboxes
 
-Expect a different set of survivors minutes later, and expect the survivors to
-be someone else's compromised router: independent measurement puts ~10% of
-working free proxies at outright malicious, TLS interception included
-([NDSS'24 open-proxy study](https://arxiv.org/html/2403.02445v1)). A proxy sees
-everything sent through it — including the WorkOS bearer token this tool
-captures. Cloudflare's own
-[troubleshooting page](https://developers.cloudflare.com/cloudflare-challenges/troubleshooting/challenge-solve-issues/)
-tells users to turn proxies off when Turnstile misbehaves.
-
-Measured on the same day, on the entries that *did* answer: every one that
-carried a plain HTTPS request to the sign-up host re-signed
-`login.console.river.ai` with its own CA — `issuer=Research`,
-`UNABLE_TO_VERIFY_LEAF_SIGNATURE`, where a direct connection shows
-`issuer=Google Trust Services`. Chrome refuses those outright
-(`ERR_CERT_AUTHORITY_INVALID`), so 0 of 4 loaded the sign-up page, and anything
-that *had* gone through would be readable by whoever runs the box. The built-in
-preflight therefore probes the sign-up host with certificate verification on,
-and rejects a proxy that terminates TLS itself.
-
-## 🚧 What actually blocks a sign-up
-
-The hosted AuthKit flow takes the name, the e-mail and the password, and only
-then decides. Two gates sit there, and each was measured on 2026-10-13 with one
-variable at a time:
-
-**1. The inbox domain.** Disposable-inbox domains are refused outright:
-
-| Inbox domain | Verdict |
-| --- | --- |
-| `gmail.com`, `outlook.com` | accepted — the flow moves on to "Verify your email" |
-| `mail.tm` (`maxxspace.com`), `mail.gw` | **"Access blocked, please contact support."** |
-| `guerrillamail.com`, `sharklasers.com`, `mailinator.com`, `maildrop.cc` | refused the same way |
-
-Every disposable-inbox service with a free API is on that list, so the default
-`mailtm` backend cannot mint any more. Two backends are available:
+The sign-up refuses known disposable-inbox domains, so pick a backend whose domain
+it accepts — **`mailtrap` is the one that mints end to end today**, and `imap` with
+a mailbox you already own works too.
 
 | `--mailbox` | Inbox | Needs |
 | --- | --- | --- |
-| `mailtm` (default) | mail.tm / any mail.tm-compatible API (`--mail-base`) | nothing — but every disposable domain is refused |
+| `mailtm` (default) | mail.tm / any mail.tm-compatible API (`--mail-base`) | nothing |
 | `imap` | a real mailbox you already own, one `local+tag@domain` alias per account | an app password |
-| `guerrilla` | Guerrilla Mail (`api.guerrillamail.com`) | nothing — rotating domains, all of them refused so far |
-| `inboxes` | Inboxes.com — eighteen domains on a public JSON API | nothing — every domain is on the public blocklist |
-| `tempmailio` | temp-mail.io — rotating domain pool, JSON API | nothing — pool domains were all listed in the samples taken |
-| `tempmailorg` | temp-mail.org — a pool whose domains largely pass the gate | an API session harvested from a **headed** browser: Cloudflare binds the clearance to the browser, so a replay from Node answers 403 even with the cookies; the backend fails loudly without a session |
+| `guerrilla` | Guerrilla Mail (`api.guerrillamail.com`) | nothing |
+| `inboxes` | Inboxes.com — eighteen domains on a public JSON API | nothing |
+| `tempmailio` | temp-mail.io — a rotating domain pool, JSON API | nothing |
+| `tempmailorg` | temp-mail.org — a rotating domain pool | an API session taken from a **headed** browser (the backend fails loudly without one) |
 | `mailtrap` | **Mailtrap Inbound — one fresh inbox per account on `inbound-mailtrap.io`** | a Mailtrap API token (`MAILTRAP_TOKEN`, `--mailtrap-token-file`, or `%USERPROFILE%\.river-mailtrap-token`) |
 
-The last five exist because the gate is a domain-list test: a pool member the list
-has never seen is all it takes, and `--mail-domain <domain>` forces the backend to
-keep minting addresses until the pool yields exactly that domain.
-
-`mailtrap` is the one that mints end to end today: `inbound-mailtrap.io` is not on
-the sign-up's domain list, and its REST API hands out one inbox per account and
-reads the code with no captcha and no browser involved.
+`--mail-domain <domain>` forces the backend to keep minting addresses until the
+pool yields exactly that domain.
 
 ```bash
 # one account through a fresh mailbox; add --allow-direct to run from your own IP
@@ -241,9 +205,6 @@ node src/cli.js --count 1 --allow-direct --mailbox mailtrap \
 printf '%s' 'abcd efgh ijkl mnop' > "$HOME/.river-imap-pass"     # %USERPROFILE% on Windows
 node src/cli.js --count 1 --allow-direct \
   --mailbox imap --imap-user you@gmail.com --imap-pass-file "$HOME/.river-imap-pass"
-# once that account mints, raise --count gradually rather than in one burst:
-# five sign-ups from one address inside a minute is exactly the velocity signal
-# the sign-up screens for.
 # or export IMAP_USER / IMAP_PASS / IMAP_HOST (default imap.gmail.com)
 ```
 
@@ -256,36 +217,6 @@ proxy tunnel when one is in play, and never marks messages read. Gmail needs
 2-step verification for an app password; Outlook, Fastmail and a mailbox on your
 own domain work the same way. `--mail-domain` overrides which domain the aliases
 are minted on (default: the domain of `IMAP_USER`).
-
-**2. The browser's fingerprint.** This is the gate that hid behind the first one.
-The same address, same browser, same `gmail.com` inbox — only the User-Agent
-differed:
-
-| User-Agent the page saw | Verdict |
-| --- | --- |
-| `… HeadlessChrome/155.0.0.0 …` (as Chrome was launched) | **"Access blocked, please contact support."** |
-| `… Chrome/155.0.0.0 …` (overridden per page) | accepted — "Verify your email … enter the code" |
-
-`navigator.webdriver` already reads `false` on current headless Chrome, so the
-UA string alone carried the decision: an address and an inbox that both pass
-were still refused while the page announced it was headless. Because every
-earlier measurement ran with that UA, the refusal *looked* like an IP-reputation
-verdict from the exit proxy — it was not. The tool now overrides the UA per page
-before the first navigation (`src/hygiene.js`, `--no-hygiene` keeps the real one
-for diagnosis), and the per-page override leaves the operator's Chrome itself
-untouched.
-
-**3. Velocity turns into a phone requirement.** After a handful of sign-ups from
-one address the flow stops offering the e-mail code path at all and lands on
-`/radar-challenge/send` — *"Verify your phone number … You must have a valid
-mobile phone number to sign up."* Measured 2026-10-14 from this line: three
-accounts succeeded, then every further attempt was challenged — including ones on
-a **fresh browser profile**, a **fresh mailbox on the same domain** and a
-**different proxy exit** — so the counter belongs to the sign-up flow, not to the
-browser or the inbox. A profile carried exactly one account before the challenge
-appeared, and `-PauseSeconds` in the staged runner exists to keep the rate down.
-Phone verification is not something this tool can do: there is no SMS number in
-the loop, and inventing one would be a different project.
 
 ## 🧰 CLI reference
 
@@ -342,7 +273,7 @@ cdp.close();
 `provisionAccount` throws without a `proxy`, exactly like the CLI: a caller who
 wants to sign up from the machine's own address has to say `allowDirect: true`.
 
-## 🤖 Available models
+## 🤖 Models & free tier
 
 New accounts can call these models through `https://api.river.ai/v1`
 (OpenAI-compatible). Both support text **and** image input, streaming,
@@ -354,7 +285,15 @@ reasoning, and function calling.
 | `zai-org/GLM-5.3-Flash` | $0.12 | $0.024 | $0.40 | 1,048,576 | 128K |
 
 *Prices in USD per million tokens. Reasoning tokens are billed as output.*
-Confirm at runtime with `GET https://api.river.ai/v1/models`.
+
+**What a fresh account gets:** a **$25 balance** — the tool reads `balanceUsd` for every account it
+creates and records it in the JSON/CSV export (`"balanceUsd": 25`), so the credit is visible per key
+rather than assumed.
+
+**How to get more:** the balance lives on the **account** — one account per key, and a new account is
+a new balance. `--count N` creates N accounts, each with its own `rv_…` key.
+
+Confirm the live model list and prices at runtime with `GET https://api.river.ai/v1/models`.
 
 ```bash
 curl https://api.river.ai/v1/chat/completions \
