@@ -23,7 +23,7 @@
 - 🔑 **Creación masiva de cuentas + API keys** — una cuenta River *y* una clave `rv_…` por ejecución.
 - 🧼 **Sesiones totalmente aisladas** — cada cuenta se ejecuta en su propio contexto de navegador CDP; cookies y `localStorage` no se filtran.
 - 🪶 **Cero dependencias** — cliente WebSocket RFC6455 + CDP hecho a mano. Sin `npm install`.
-- 🤖 **Registro en navegador real** — la página de WorkOS AuthKit (Cloudflare Turnstile + WorkOS Radar) se maneja en Chrome/Chromium real en tu máquina o VPS.
+- 🤖 **Registro en navegador real** — la página hospedada de AuthKit se maneja en Chrome/Chromium real en tu máquina o VPS.
 - 📧 **Buzones desechables** — los códigos se leen directamente de [mail.tm](https://mail.tm).
 - 📦 **Exportación** — resultados en JSON **y** CSV.
 - 🔌 **Conector 9Router** — expón tus claves River como proveedor compatible con OpenAI en [9Router](https://9router.com) con un comando.
@@ -44,11 +44,14 @@ node src/cli.js --count 3 --cdp-url http://127.0.0.1:9222
 
 ## 🧭 Cómo funciona
 
-La consola de River se autentica con **WorkOS AuthKit** y **Cloudflare
-Turnstile**, así que no hay endpoint HTTP de registro automatizable
-(`POST /api/auth/signup` → `404 Password signup is disabled`). Por eso
-`river-bulk` maneja la UI real en un navegador y luego usa la API REST de la
-consola con el token de sesión capturado:
+La consola de River registra a los usuarios mediante un **flujo hospedado en el
+navegador** (WorkOS AuthKit), y su API REST usa tokens bearer — no hay registro
+HTTP automatizable. Por eso `river-bulk` maneja la UI hospedada real en un
+navegador, captura el token de sesión y luego usa la API de la consola:
+
+> **Aviso:** el registro de River ahora pide verificación telefónica tras ver
+> unas cuantas altas; la herramienta se detiene en ese paso — registra en lotes
+> pequeños.
 
 ```
 buzón mail.tm ──▶ UI de registro ──▶ código ──▶ consola (token capturado)
@@ -106,7 +109,7 @@ console.log(account.email, account.apiKey, account.balanceUsd);
 cdp.close();
 ```
 
-## 🤖 Modelos disponibles
+## 🤖 Modelos y plan gratuito
 
 | Model ID | Entrada | Entrada cache | Salida | Contexto | Salida máx |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -114,6 +117,15 @@ cdp.close();
 | `zai-org/GLM-5.3-Flash` | $0.12 | $0.024 | $0.40 | 1.048.576 | 128K |
 
 *Precios en USD por millón de tokens. Ambos admiten texto + imagen, streaming, razonamiento y llamadas a funciones.*
+
+**Lo que recibe una cuenta nueva:** un saldo de **$25** — la herramienta lee `balanceUsd` en cada
+cuenta y lo escribe en la exportación JSON/CSV (`"balanceUsd": 25`), así el crédito queda visible
+por key en lugar de darse por supuesto.
+
+**Cómo obtener más:** el saldo vive en la **cuenta** — una cuenta por key, y una cuenta nueva es un
+saldo nuevo. `--count N` crea N cuentas, cada una con su propia key `rv_…`.
+
+Consulta la lista de modelos y precios en vivo con `GET https://api.river.ai/v1/models`.
 
 ```bash
 curl https://api.river.ai/v1/chat/completions \
