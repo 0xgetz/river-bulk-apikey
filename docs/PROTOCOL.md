@@ -129,3 +129,41 @@ curl https://api.river.ai/v1/chat/completions \
 - Each run needs a fresh browser context; reusing one re-logs the same user.
 - Turnstile is solved inside the real browser. Do not add a stealth patch.
 - mail.tm domains may rate-limit aggressive bursts — keep concurrency modest.
+
+## 7. The proxy layer
+
+An account is only properly proxied when *both* of its transports leave from the
+same address:
+
+| Transport | Mechanism |
+| --- | --- |
+| Page traffic (Chrome) | `Target.createBrowserContext { proxyServer }` — one proxy per context. Chrome **ignores** `user:pass@` inside that URL and sends an unauthenticated `CONNECT`, so credentials are supplied instead by enabling `Fetch.handleAuthRequests` and answering the challenge with `proxyUsername` / `proxyPassword`. SOCKS with credentials cannot be authenticated at all and is dropped. |
+| Node traffic (mail.tm, `console.river.ai/api/*`) | `src/proxy.js` opens a CONNECT / SOCKS5 / SOCKS4a tunnel and gives `https.request` an `https.Agent` whose sockets are TLS-wrapped over that tunnel. |
+
+There is no fallback path: if the tunnel cannot be established the account
+fails, and the request is never sent directly.
+
+One more shared-state trap: Chrome's disk cache is per **profile**, not per
+context, so each account session also sets `Network.setCacheDisabled: true`.
+Without it account #2 can be served account #1's cached document and never touch
+its own proxy — which looks exactly like a working proxy until you compare
+egress IPs.
+
+Before any account is minted the preflight asks each candidate proxy what exit
+address it presents, and drops the ones that answer with this machine's own
+address — that is what catches a transparent proxy, which passes every other
+test. Knowing that address normally means asking an echo service, and asking it
+*directly* is one request sent from the very address the list exists to hide, so
+it is not the default: `--own-ip <address>` (or `OWN_IP`) takes the operator's
+value, `--own-ip auto` reads it from the router over UPnP inside the LAN, and
+only `--allow-direct-lookup` performs the lookup. If none of those produce an
+address the run stops. A stale `--own-ip` is worse than none — a transparent
+proxy would match it and pass — so the value in use is printed on every run and
+needs refreshing whenever the ISP address may have moved. On a **carrier-grade
+NAT** line it moves without the router showing anything: the router keeps
+reporting the same private WAN address (`100.64.0.7` on the line this was
+measured on) while the public address changed from `198.51.100.42` to
+`198.51.100.77` inside nine hours. UPnP answers with the private one and is
+therefore rejected as useless rather than trusted. `--no-probe` skips only
+the liveness probe: the egress check still runs, and only `--no-verify-egress`
+turns it off.

@@ -23,7 +23,7 @@
 - 🔑 **Buat massal akun + API key** — satu akun River *dan* satu key `rv_…` per akun.
 - 🧼 **Sesi terisolasi** — setiap akun berjalan di konteks browser CDP sendiri, cookie dan `localStorage` tidak bocor antar akun.
 - 🪶 **Tanpa dependensi** — WebSocket RFC6455 + klien CDP buatan sendiri. Tidak perlu `npm install`.
-- 🤖 **Pendaftaran lewat browser nyata** — halaman WorkOS AuthKit (Cloudflare Turnstile + WorkOS Radar) digerakkan di Chrome/Chromium sungguhan di mesin atau VPS Anda.
+- 🤖 **Pendaftaran lewat browser nyata** — halaman AuthKit yang dihosting digerakkan di Chrome/Chromium sungguhan di mesin atau VPS Anda.
 - 📧 **Kotak masuk sekali pakai** — kode verifikasi dibaca langsung dari [mail.tm](https://mail.tm).
 - 📦 **Ekspor** — hasil ditulis ke JSON **dan** CSV.
 - 🔌 **Konektor 9Router** — jadikan key River sebagai provider kompatibel-OpenAI di [9Router](https://9router.com) dengan satu perintah.
@@ -44,11 +44,14 @@ node src/cli.js --count 3 --cdp-url http://127.0.0.1:9222
 
 ## 🧭 Cara kerja
 
-Console River memakai autentikasi **WorkOS AuthKit** dengan **Cloudflare
-Turnstile**, sehingga tidak ada endpoint signup HTTP
-(`POST /api/auth/signup` → `404 Password signup is disabled`). Karena itu
-`river-bulk` menggerakkan UI asli di browser, lalu memanggil REST API console
-dengan token sesi yang ditangkap:
+Console River mendaftarkan pengguna lewat **alur browser yang dihosting**
+(WorkOS AuthKit), dan REST API-nya memakai token bearer — jadi tidak ada
+pendaftaran HTTP yang bisa diskrip. Karena itu `river-bulk` menggerakkan UI
+hosting yang asli di browser, menangkap token sesi, lalu memanggil API console:
+
+> **Peringatan:** pendaftaran River kini meminta verifikasi telepon setelah
+> beberapa pendaftaran; alat ini berhenti di langkah itu — daftar dalam batch
+> kecil.
 
 ```
 inbox mail.tm ──▶ UI pendaftaran ──▶ kode e-mail ──▶ console (token ditangkap)
@@ -106,7 +109,7 @@ console.log(account.email, account.apiKey, account.balanceUsd);
 cdp.close();
 ```
 
-## 🤖 Model yang tersedia
+## 🤖 Model & kuota gratis
 
 | Model ID | Input | Input cache | Output | Konteks | Output maks |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -114,6 +117,15 @@ cdp.close();
 | `zai-org/GLM-5.3-Flash` | $0.12 | $0.024 | $0.40 | 1.048.576 | 128K |
 
 *Harga dalam USD per juta token. Keduanya mendukung teks + gambar, streaming, reasoning, dan pemanggilan fungsi.*
+
+**Yang didapat akun baru:** saldo **$25** — alat ini membaca `balanceUsd` untuk setiap akun dan
+menuliskannya ke ekspor JSON/CSV (`"balanceUsd": 25`), jadi kreditnya terlihat per key, bukan
+diasumsikan.
+
+**Cara menambah:** saldo melekat pada **akun** — satu akun per key, dan akun baru berarti saldo
+baru. `--count N` membuat N akun, masing-masing dengan key `rv_…` sendiri.
+
+Cek daftar model dan harga terbaru kapan saja: `GET https://api.river.ai/v1/models`.
 
 ```bash
 curl https://api.river.ai/v1/chat/completions \

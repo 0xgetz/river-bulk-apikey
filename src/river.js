@@ -25,6 +25,8 @@ const http = require('http');
 const https = require('https');
 const { URL } = require('url');
 const { CDP } = require('./cdp');
+const { browserUrl, createAgent, attachProxyAuth } = require('./proxy');
+const { applyHygiene } = require('./hygiene');
 
 const HOST = 'https://console.river.ai';
 const LOGIN_HOST = 'https://login.console.river.ai';
@@ -48,7 +50,11 @@ function randomPassword(len = 16) {
   return p;
 }
 
-function httpJson(method, url, { headers = {}, body, timeoutMs = 30000 } = {}) {
+/**
+ * Small JSON-over-HTTP helper. `agent` lets a caller pin the request to a
+ * proxy (see ./proxy createAgent) — when it is set there is no direct route.
+ */
+function httpJson(method, url, { headers = {}, body, timeoutMs = 30000, agent } = {}) {
   return new Promise((resolve, reject) => {
     const u = new URL(url);
     const lib = u.protocol === 'https:' ? https : http;
@@ -56,6 +62,7 @@ function httpJson(method, url, { headers = {}, body, timeoutMs = 30000 } = {}) {
     const req = lib.request(
       {
         method,
+        agent,
         hostname: u.hostname,
         port: u.port || (u.protocol === 'https:' ? 443 : 80),
         path: u.pathname + u.search,
@@ -186,15 +193,38 @@ class RiverBrowser {
         inputs[i].dispatchEvent(new Event('input',{bubbles:true}));
         inputs[i].dispatchEvent(new Event('change',{bubbles:true}));
       }
-      return { ok:true, n: inputs.length };
+      // The screen usually advances on its own once the last digit lands; when it
+      // does not, submitting is what a person would do — observed once in a real
+      // run where the code was accepted but the console never moved on.
+      const last = inputs[5];
+      last.focus();
+      for (const type of ['keydown','keypress','keyup']) {
+        last.dispatchEvent(new KeyboardEvent(type, { key:'Enter', code:'Enter', keyCode:13, which:13, bubbles:true }));
+      }
+      const btn = [...document.querySelectorAll('button')].find(b => /continue|verify|submit|confirm/i.test(b.innerText||''));
+      if(btn) btn.click();
+      return { ok:true, n: inputs.length, submitted: !!btn };
     })()`);
   }
+}
+
+/**
+ * Snapshot of what the page currently shows — folded into step failures so a
+ * blocked flow reports *why* instead of just which screen never appeared.
+ */
+async function pageState(rb) {
+  const url = await rb.currentUrl().catch(() => '?');
+  const text = await rb.text().catch(() => '');
+  return `${url} · "${String(text).replace(/\s+/g, ' ').trim().slice(0, 300)}"`;
 }
 
 /**
  * Full single-account provisioning. Creates an isolated browser context,
  * signs up via the hosted AuthKit UI with a mail.tm inbox, verifies e-mail,
  * captures the console access token, and mints an API key.
+ *
+ * Pass `proxy` (see ./proxy) to send both the page traffic and the console API
+ * calls out through it; without one, everything leaves from this machine.
  *
  * @returns {Promise<{email,password,apiKey,apiKeyId,token,balanceUsd,raw}>}
  */
@@ -207,19 +237,43 @@ async function provisionAccount(cdp, mail, opts = {}) {
     description,
     expiresInDays,
     log = () => {},
+    proxy = null,
+    allowDirect = false,
     signupTimeoutMs = 60000,
     verifyTimeoutMs = 120000,
   } = opts;
+
+  // The CLI already refuses to run without a proxy list; the library refuses
+  // the same way, so a caller cannot reach River from this machine's address
+  // merely by forgetting to pass one.
+  if (!proxy && !allowDirect) {
+    throw new Error(
+      "no proxy given — refusing to sign up from this machine's own IP.\n" +
+        '  Pass { proxy } (see ./proxy) or { allowDirect: true } to opt in explicitly.'
+    );
+  }
 
   const acct = await mail.createAccount();
   const email = acct.address;
   log(`inbox ${email}`);
 
-  const browserContextId = await cdp.createBrowserContext();
+  // One context per account, and — whenever a proxy is in play — one exit
+  // address per account: page traffic through the context's proxy, console API
+  // traffic through an agent pinned to the same proxy. No request has a direct
+  // fallback, so a broken proxy fails the account instead of leaking the host IP.
+  const agent = proxy ? createAgent(proxy) : undefined;
+  const browserContextId = await cdp.createBrowserContext({ proxyServer: proxy ? browserUrl(proxy) : undefined });
   const { targetId, sessionId } = await cdp.newPage({ browserContextId });
   await cdp.send('Page.enable', {}, sessionId);
   await cdp.send('Runtime.enable', {}, sessionId);
   await cdp.send('Network.enable', {}, sessionId);
+  // Chrome's disk cache is per profile, not per context: without this, account
+  // #2 can be served account #1's bytes and never touch its own proxy.
+  await cdp.send('Network.setCacheDisabled', { cacheDisabled: true }, sessionId);
+  // Announcing "HeadlessChrome" is enough for the sign-up to be refused even
+  // from a clean address (see ./hygiene); override before the first navigation.
+  if (opts.hygiene !== false) await applyHygiene(cdp, sessionId, { log });
+  const detachProxyAuth = await attachProxyAuth(cdp, sessionId, proxy);
 
   let token = null;
   const off = cdp.on(
@@ -240,25 +294,33 @@ async function provisionAccount(cdp, mail, opts = {}) {
 
     // Step 1: name + email
     let ok = await rb.waitForText('First name', { timeoutMs: signupTimeoutMs });
-    if (!ok) throw new Error('sign-up form did not load');
-    await rb.fillSignup({ firstName, lastName, email });
+    if (!ok) throw new Error(`sign-up form did not load — page ${await pageState(rb)}`);
+    const filled = await rb.fillSignup({ firstName, lastName, email });
+    if (!filled.ok1 || !filled.ok2 || !filled.ok3 || !filled.clicked) {
+      throw new Error(`sign-up form did not accept input (${JSON.stringify(filled)}) — page ${await pageState(rb)}`);
+    }
 
     // Step 2: password
     await rb.waitForText('Password', { timeoutMs: signupTimeoutMs });
     await sleep(1500);
-    await rb.fillPassword(password);
+    const pwd = await rb.fillPassword(password);
+    if (!pwd.ok) throw new Error(`password step failed (${JSON.stringify(pwd)}) — page ${await pageState(rb)}`);
 
     // Step 3: e-mail verification code
     const atOtp = await rb.waitForText('Verify your email', { timeoutMs: signupTimeoutMs });
-    if (!atOtp) throw new Error('email verification screen did not appear');
-    const code = await mail.waitForCode({ subjectIncludes: 'verify', timeoutMs: verifyTimeoutMs });
+    if (!atOtp) throw new Error(`email verification screen did not appear — page ${await pageState(rb)}`);
+    const code = await mail.waitForCode({ address: email, subjectIncludes: 'verify', timeoutMs: verifyTimeoutMs });
     log(`code ${code}`);
     await rb.enterOtp(code);
 
-    // Step 4: wait for console to finish and the bearer token to appear
-    const deadline = Date.now() + 45000;
+    // Step 4: wait for console to finish and the bearer token to appear.
+    // 45s was enough when the console redirected straight away, but the hosted
+    // flow stalls sometimes (observed: code accepted, token still absent after
+    // 45s on an otherwise identical run), so the window is generous and the
+    // failure reports what the page was showing.
+    const deadline = Date.now() + 120000;
     while (Date.now() < deadline && !token) await sleep(1000);
-    if (!token) throw new Error('did not capture console access token');
+    if (!token) throw new Error(`did not capture console access token — page ${await pageState(rb)}`);
   } finally {
     off();
   }
@@ -266,14 +328,16 @@ async function provisionAccount(cdp, mail, opts = {}) {
   let balanceUsd = null;
   let key = null;
   try {
-    const me = await httpJson('GET', `${HOST}/api/me`, { headers: { Authorization: `Bearer ${token}` } });
+    const me = await httpJson('GET', `${HOST}/api/me`, { headers: { Authorization: `Bearer ${token}` }, agent });
     if (me.body && me.body.authenticated !== true) throw new Error('token not accepted by /api/me');
     const billing = await httpJson('GET', `${HOST}/api/billing/account`, {
       headers: { Authorization: `Bearer ${token}` },
+      agent,
     });
     balanceUsd = billing.body && billing.body.balance_usd != null ? billing.body.balance_usd : null;
-    key = await createApiKey(token, { name: keyName, description, expiresInDays });
+    key = await createApiKey(token, { name: keyName, description, expiresInDays, agent });
   } finally {
+    await detachProxyAuth();
     await cdp.closePage(targetId);
     await cdp.disposeBrowserContext(browserContextId);
   }
@@ -292,34 +356,34 @@ async function provisionAccount(cdp, mail, opts = {}) {
   };
 }
 
-async function createApiKey(token, { name, description, expiresInDays, teamId } = {}) {
+async function createApiKey(token, { name, description, expiresInDays, teamId, agent } = {}) {
   const headers = { Authorization: `Bearer ${token}` };
   if (teamId) headers['X-River-Team'] = teamId;
   const body = { name };
   if (description) body.description = description;
   if (expiresInDays) body.expires_in_days = expiresInDays;
-  const res = await httpJson('POST', `${HOST}/api/keys`, { headers, body });
+  const res = await httpJson('POST', `${HOST}/api/keys`, { headers, body, agent });
   if (res.status !== 200 && res.status !== 201) {
     throw new Error(`createApiKey failed (${res.status}): ${JSON.stringify(res.body)}`);
   }
   return res.body;
 }
 
-async function listApiKeys(token, { teamId } = {}) {
+async function listApiKeys(token, { teamId, agent } = {}) {
   const headers = { Authorization: `Bearer ${token}` };
   if (teamId) headers['X-River-Team'] = teamId;
-  const res = await httpJson('GET', `${HOST}/api/keys`, { headers });
+  const res = await httpJson('GET', `${HOST}/api/keys`, { headers, agent });
   if (res.status !== 200) throw new Error(`listApiKeys failed (${res.status})`);
   return res.body;
 }
 
-async function whoami(token) {
-  const res = await httpJson('GET', `${HOST}/api/me`, { headers: { Authorization: `Bearer ${token}` } });
+async function whoami(token, { agent } = {}) {
+  const res = await httpJson('GET', `${HOST}/api/me`, { headers: { Authorization: `Bearer ${token}` }, agent });
   return res.body;
 }
 
-async function listModels(apiKey) {
-  const res = await httpJson('GET', `${API_HOST}/v1/models`, { headers: { Authorization: `Bearer ${apiKey}` } });
+async function listModels(apiKey, { agent } = {}) {
+  const res = await httpJson('GET', `${API_HOST}/v1/models`, { headers: { Authorization: `Bearer ${apiKey}` }, agent });
   return res.body;
 }
 

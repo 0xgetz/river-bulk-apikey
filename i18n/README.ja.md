@@ -23,7 +23,7 @@
 - 🔑 **アカウント＋API キーの一括作成** — 1 実行で River アカウント *と* `rv_…` キーを 1 つずつ。
 - 🧼 **完全に分離されたセッション** — 各アカウントは独自の CDP ブラウザコンテキストで動作し、cookie や `localStorage` が漏れません。
 - 🪶 **依存関係ゼロ** — 自作の RFC6455 WebSocket + CDP クライアント。`npm install` 不要。
-- 🤖 **実ブラウザでの登録** — WorkOS AuthKit のページ（Cloudflare Turnstile + WorkOS Radar）を、自分のマシンまたは VPS 上の実 Chrome/Chromium で操作します。
+- 🤖 **実ブラウザでの登録** — ホストされた AuthKit のページを、自分のマシンまたは VPS 上の実 Chrome/Chromium で操作します。
 - 📧 **使い捨て受信箱** — 認証コードは [mail.tm](https://mail.tm) から直接取得。
 - 📦 **エクスポート** — JSON **と** CSV に出力。
 - 🔌 **9Router コネクタ** — 1 コマンドで River キーを [9Router](https://9router.com) の OpenAI 互換プロバイダに。
@@ -44,11 +44,13 @@ node src/cli.js --count 3 --cdp-url http://127.0.0.1:9222
 
 ## 🧭 仕組み
 
-River コンソールは **WorkOS AuthKit** と **Cloudflare Turnstile** で認証する
-ため、スクリプト可能な登録 HTTP エンドポイントはありません
-（`POST /api/auth/signup` → `404 Password signup is disabled`）。そこで
-`river-bulk` はブラウザで実際の UI を操作し、取得したセッショントークンで
-コンソールの REST API を呼び出します：
+River コンソールは **ホスト型ブラウザフロー**（WorkOS AuthKit）で登録し、
+REST API はベアラートークン方式です — スクリプト可能な HTTP 登録はありません。
+そこで `river-bulk` はホストされた実 UI をブラウザで操作し、セッショントークンを
+取得してからコンソールの API を呼び出します：
+
+> **注意:** River の登録は、いくつか登録すると電話番号認証を求めるようになり、
+> そのステップでツールは停止します — 少ない単位で登録してください。
 
 ```
 mail.tm 受信箱 ──▶ 登録 UI ──▶ 認証コード ──▶ コンソール（トークン取得）
@@ -106,7 +108,7 @@ console.log(account.email, account.apiKey, account.balanceUsd);
 cdp.close();
 ```
 
-## 🤖 利用可能なモデル
+## 🤖 モデルと無料枠
 
 | モデル ID | 入力 | キャッシュ入力 | 出力 | コンテキスト | 最大出力 |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -114,6 +116,15 @@ cdp.close();
 | `zai-org/GLM-5.3-Flash` | $0.12 | $0.024 | $0.40 | 1,048,576 | 128K |
 
 *価格は 100 万トークンあたりの USD。両方ともテキスト＋画像入力、ストリーミング、推論、関数呼び出しに対応。*
+
+**新しいアカウントで得られるもの:** **$25** の残高 — ツールは各アカウントの `balanceUsd` を読み、
+JSON/CSV エクスポートに記録します（`"balanceUsd": 25`）。クレジットは推測ではなくキーごとに
+確認できます。
+
+**増やすには:** 残高は **アカウント** に紐づきます — 1 アカウント 1 キーで、新しいアカウントは
+新しい残高です。`--count N` は N 個のアカウントを作成し、それぞれが独自の `rv_…` キーを持ちます。
+
+最新のモデルと価格はいつでも `GET https://api.river.ai/v1/models` で確認できます。
 
 ```bash
 curl https://api.river.ai/v1/chat/completions \

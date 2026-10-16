@@ -23,7 +23,7 @@
 - 🔑 **批量创建账号 + API 密钥** —— 每个账号同时得到一个 River 账号和一个 `rv_…` 密钥。
 - 🧼 **完全隔离的会话** —— 每个账号运行在独立的 CDP 浏览器上下文中，cookie 与 `localStorage` 不会互相泄漏。
 - 🪶 **零依赖** —— 手写的 RFC6455 WebSocket + CDP 客户端，无需 `npm install`。
-- 🤖 **真实浏览器注册** —— WorkOS AuthKit 页面（Cloudflare Turnstile + WorkOS Radar）在你自己机器或 VPS 上的真实 Chrome/Chromium 中驱动。
+- 🤖 **真实浏览器注册** —— 托管在 WorkOS AuthKit 的页面在你自己机器或 VPS 上的真实 Chrome/Chromium 中驱动。
 - 📧 **一次性邮箱** —— 验证码直接读取自 [mail.tm](https://mail.tm)。
 - 📦 **导出** —— 结果写入 JSON **和** CSV。
 - 🔌 **9Router 连接器** —— 一条命令即可把 River 密钥注册为 [9Router](https://9router.com) 的 OpenAI 兼容提供商。
@@ -44,10 +44,12 @@ node src/cli.js --count 3 --cdp-url http://127.0.0.1:9222
 
 ## 🧭 工作原理
 
-River 控制台通过 **WorkOS AuthKit** 与 **Cloudflare Turnstile** 完成认证，
-因此不存在可脚本化的注册 HTTP 接口
-（`POST /api/auth/signup` → `404 Password signup is disabled`）。因此
-`river-bulk` 在浏览器中驱动真实 UI，再使用捕获到的会话令牌调用控制台 REST API：
+River 控制台通过**托管的浏览器流程**（WorkOS AuthKit）完成注册，其 REST API
+使用 Bearer 令牌 —— 不存在可脚本化的 HTTP 注册。因此 `river-bulk` 在浏览器中
+驱动真实的托管 UI，捕获会话令牌，然后调用控制台自身的 API：
+
+> **提示：** River 的注册在看到若干次注册后会要求手机验证，工具会在该步骤停止 ——
+> 请小批量注册。
 
 ```
 mail.tm 邮箱 ──▶ 注册 UI ──▶ 邮件验证码 ──▶ 控制台（捕获令牌）
@@ -105,7 +107,7 @@ console.log(account.email, account.apiKey, account.balanceUsd);
 cdp.close();
 ```
 
-## 🤖 可用模型
+## 🤖 模型与免费额度
 
 | 模型 ID | 输入 | 缓存输入 | 输出 | 上下文 | 最大输出 |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -113,6 +115,14 @@ cdp.close();
 | `zai-org/GLM-5.3-Flash` | $0.12 | $0.024 | $0.40 | 1,048,576 | 128K |
 
 *价格为每百万 token 的美元数。两者均支持文本 + 图像输入、流式、推理与函数调用。*
+
+**新账户能得到什么：** **$25** 余额 —— 工具会为每个账户读取 `balanceUsd` 并写入 JSON/CSV 导出
+（`"balanceUsd": 25`），所以额度是按 key 可见的，而不是假设的。
+
+**如何获得更多：** 余额属于**账户** —— 一个账户一个 key，新账户就是新余额。
+`--count N` 会创建 N 个账户，每个都有自己的 `rv_…` key。
+
+随时用 `GET https://api.river.ai/v1/models` 查看最新的模型与价格。
 
 ```bash
 curl https://api.river.ai/v1/chat/completions \

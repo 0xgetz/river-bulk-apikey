@@ -289,9 +289,19 @@ class CDP extends EventEmitter {
    * Creates an isolated incognito-like browser context. Accounts created in
    * separate contexts do not share cookies or localStorage, which is required
    * when minting many independent River accounts in one browser.
+   *
+   * A context can carry its own proxy, so each account reaches the outside
+   * world from a different address:
+   *   await cdp.createBrowserContext({ proxyServer: 'http://127.0.0.1:8899' })
+   *
+   * Note: Chrome ignores `user:pass@` inside that URL — authenticated proxies
+   * need `attachProxyAuth()` from ./proxy (Fetch.handleAuthRequests).
    */
-  async createBrowserContext() {
-    const { browserContextId } = await this.send('Target.createBrowserContext', { disposeOnDetach: false }, null);
+  async createBrowserContext({ proxyServer, proxyBypassList } = {}) {
+    const params = { disposeOnDetach: false };
+    if (proxyServer) params.proxyServer = proxyServer;
+    if (proxyBypassList) params.proxyBypassList = proxyBypassList;
+    const { browserContextId } = await this.send('Target.createBrowserContext', params, null);
     return browserContextId;
   }
 

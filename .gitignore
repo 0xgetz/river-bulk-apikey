@@ -1,6 +1,10 @@
 # dependencies
 node_modules/
 
+# local proxy lists (machine-specific, mostly dead within hours)
+proxies.txt
+proxies-*.txt
+
 # generated results (may contain secrets)
 outputs/
 accounts.json
@@ -10,9 +14,18 @@ accounts.json
 .env
 .env.*
 
+# credentials (IMAP app passwords for --mailbox imap)
+.river-imap-pass
+*-imap-pass
+imap-pass*
+
 # os / editor
 .DS_Store
 Thumbs.db
 *.log
 .idea/
 .vscode/
+
+# scratch files
+m.json
+r.bin
