@@ -31,9 +31,16 @@
  * Cloudflare fact worth keeping: every request from this machine and from the
  * public datacenter proxies we tried is answered with the "Just a moment…"
  * interstitial (403) — Node alone cannot pass it, and headless Chrome never
- * clears the widget. A headed browser must clear it once; the harvested
- * `{cookies, token}` then lets this module talk to the API (or, if the edge
- * still refuses a Node client, fails loudly instead of pretending).
+ * clears the widget. A headed browser must clear it once, and the harvested
+ * `{cookies, token}` **is not enough to replay from Node**: measured 2026-10-15,
+ * a jar of 17 cookies taken straight from CDP (`Network.getAllCookies`, so
+ * `cf_clearance` included) was refused with the same 403 on `GET /mailbox`,
+ * `GET /messages` and `POST /mailbox`. The edge fingerprints the client, not
+ * just the cookie, so the working reader is an in-page `fetch()` from the
+ * cleared page (`Runtime.evaluate`), which answers 200 — see the page mode in
+ * `tools/inbox-factory.js` and `outputs/inbox-rail/tempmailorg-session-evidence.json`.
+ * This module still speaks the raw protocol and fails loudly rather than
+ * pretending when the edge refuses it.
  *
  * Same shape as MailTM / TempMailIo / GuerrillaMail for provisionAccount():
  *   createAccount() -> {address, token}
@@ -210,7 +217,7 @@ class TempMailOrg {
   expect(res, what) {
     if (res.status === 403 && looksLikeChallenge(res.text)) {
       throw new Error(
-        `temp-mail.org ${what}: Cloudflare challenge (403) — this client/exit is not cleared; use a session harvested from a cleared headed browser`
+        `temp-mail.org ${what}: Cloudflare challenge (403) — a Node client is refused here even with a jar taken from a cleared page (measured 2026-10-15: 17 cookies incl. cf_clearance, still 403). The working reader is an in-page fetch() from the cleared page; see tools/inbox-factory.js and outputs/inbox-rail/tempmailorg-session-evidence.json`
       );
     }
     if (res.status === 401) {

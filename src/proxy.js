@@ -24,7 +24,15 @@ const http = require('http');
 const https = require('https');
 const { URL } = require('url');
 
-const DEFAULT_TIMEOUT_MS = 15000;
+// Free exits on a degraded WAN need more than the old 15 s: measured on
+// 2026-10-14, survivors that answer in ~8 s through a healthy line needed up to
+// ~35 s while the upstream path was flapping, and a 15 s cap silently scored
+// them as dead (a false negative that looked like a 1 % pool yield).
+const DEFAULT_TIMEOUT_MS = 35000;
+// A dead exit must free its socket fast: hundreds of SYN_SENT slots held for the
+// full handshake budget starve the CPE for the whole fleet (measured: 651
+// sockets in SYN_SENT, mostly our own screens, while ICMP was clean).
+const DEFAULT_CONNECT_TIMEOUT_MS = 8000;
 
 /** Accepted line shapes:
  *    host:port
@@ -117,6 +125,30 @@ function loadProxyList(file) {
   const fs = require('fs');
   const text = fs.readFileSync(file, 'utf8');
   return parseProxyText(text);
+}
+
+/**
+ * Same, but tolerant: strips inline `# …` comments too (other agents' pool
+ * files carry `scheme://host:port  # exit=1.2.3.4` notes).
+ */
+function loadPoolFile(file) {
+  const fs = require('fs');
+  const text = fs.readFileSync(file, 'utf8');
+  const clean = text
+    .split(/\r?\n/)
+    .map((line) => line.replace(/\s+#.*$/, '').replace(/\s+\/\/.*$/, '').trim())
+    .filter(Boolean)
+    .join('\n');
+  const out = [];
+  const seen = new Set();
+  for (const p of parseProxyText(clean)) {
+    if (p.protocol === 'socks4') continue;
+    const k = `${p.protocol}://${p.host}:${p.port}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(p);
+  }
+  return out;
 }
 
 function parseProxyText(text) {
@@ -366,7 +398,13 @@ class ProxyAgent extends https.Agent {
     const host = options.host;
     const port = Number(options.port) || 443;
     let tunnel = null;
-    openTunnel(this.proxy, { host, port, timeoutMs: this.proxy.timeoutMs })
+    // Connect phase and handshake phase need different budgets: a dead exit must
+    // give up its socket quickly (a 35 s connect timeout left hundreds of
+    // SYN_SENT slots open across the fleet and starved the CPE), while a live
+    // line on a flapping path may legitimately need ~30 s for TLS.
+    const connectMs = this.proxy.connectTimeoutMs || DEFAULT_CONNECT_TIMEOUT_MS;
+    const handshakeMs = this.proxy.timeoutMs || DEFAULT_TIMEOUT_MS;
+    openTunnel(this.proxy, { host, port, timeoutMs: connectMs })
       .then((socket) => {
         tunnel = socket;
         if (options.secureEndpoint === false) return socket;
@@ -375,7 +413,7 @@ class ProxyAgent extends https.Agent {
           servername: options.servername || host,
           rejectUnauthorized: this.proxy.rejectUnauthorized !== false,
         });
-        return once(tlsSocket, 'secureConnect', this.proxy.timeoutMs || DEFAULT_TIMEOUT_MS).then(() => tlsSocket);
+        return once(tlsSocket, 'secureConnect', handshakeMs).then(() => tlsSocket);
       })
       .then((socket) => callback(null, socket))
       .catch((err) => {
@@ -540,6 +578,7 @@ module.exports = {
   parseProxy,
   parseProxyText,
   loadProxyList,
+  loadPoolFile,
   browserUrl,
   label,
   openTunnel,

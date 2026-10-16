@@ -25,3 +25,7 @@ Thumbs.db
 *.log
 .idea/
 .vscode/
+
+# scratch files
+m.json
+r.bin
